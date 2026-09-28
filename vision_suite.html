@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Wave Filter Swapper</title>
+
+    <!-- MediaPipe dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #0f172a;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            position: relative;
+            width: 90vw;
+            max-width: 900px;
+            aspect-ratio: 16 / 9;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        video {
+            display: none;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror view for natural interaction */
+        }
+
+        .overlay-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(10px);
+            padding: 12px 24px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .badge {
+            background: linear-gradient(135deg, #a855f7, #ec4899);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        .instructions {
+            margin-top: 15px;
+            color: #94a3b8;
+            font-size: 0.95rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="overlay-info">
+            <span>Filter:</span>
+            <span id="filterName" class="badge">Normal</span>
+        </div>
+        
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <p class="instructions">Wave your hand across your face horizontally to trigger a filter change!</p>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const filterNameDisplay = document.getElementById('filterName');
+
+        // Filter options
+        const filters = [
+            { name: "Normal", filter: "none" },
+            { name: "Cyberpunk Neon", filter: "hue-rotate(180deg) saturate(200%) contrast(120%)" },
+            { name: "Thermal Vision", filter: "invert(100%) hue-rotate(270deg) contrast(150%)" },
+            { name: "Vintage Sepia", filter: "sepia(100%) contrast(110%) brightness(90%)" },
+            { name: "Grayscale Noir", filter: "grayscale(100%) contrast(150%)" },
+            { name: "Inverted Reality", filter: "invert(100%)" }
+        ];
+
+        let currentFilterIndex = 0;
+        let lastHandX = null;
+        let lastSwipeTime = 0;
+
+        function applyFilter(index) {
+            currentFilterIndex = index;
+            const current = filters[currentFilterIndex];
+            canvasCtx.filter = current.filter;
+            filterNameDisplay.textContent = current.name;
+        }
+
+        function onResults(results) {
+            // Resize canvas to match video stream
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+
+            canvasCtx.save();
+            
+            // Draw original mirrored camera frame with selected CSS filter
+            applyFilter(currentFilterIndex);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.restore();
+
+            // Detect Hand Movement for Wave/Swipe Filter Triggering
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const hand = results.multiHandLandmarks[0];
+                const wristX = hand[0].x; // Wrist coordinate (normalized 0.0 - 1.0)
+                const now = Date.now();
+
+                if (lastHandX !== null) {
+                    const deltaX = Math.abs(wristX - lastHandX);
+
+                    // Threshold check for fast wave/swipe movement (minimum 300ms cooldown)
+                    if (deltaX > 0.15 && (now - lastSwipeTime > 500)) {
+                        currentFilterIndex = (currentFilterIndex + 1) % filters.length;
+                        lastSwipeTime = now;
+                    }
+                }
+                lastHandX = wristX;
+            } else {
+                lastHandX = null;
+            }
+        }
+
+        // Initialize MediaPipe Hands detector
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onResults);
+
+        // Start Webcam feed
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start();
+    </script>
+</body>
+</html>
